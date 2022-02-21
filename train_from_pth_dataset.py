@@ -19,7 +19,7 @@ import random
 import sys
 import time
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 import numpy as np
@@ -31,7 +31,10 @@ from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD, Adam, AdamW, lr_scheduler
 from tqdm import tqdm
+from utils.datasets_custom_pth import PthDataset
+from torch.utils.data import DataLoader
 import configparser
+import cv2
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -62,6 +65,10 @@ LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable
 RANK = int(os.getenv('RANK', -1))
 WORLD_SIZE = int(os.getenv('WORLD_SIZE', 1))
 
+
+def display_tensor_img(imgs, idx = 0):
+    cv2.imshow("sample img",imgs[idx].cpu().permute(1, 2, 0).numpy())
+    cv2.waitKey(0)
 
 def train(hyp,  # path/to/hyp.yaml or hyp dictionary
           opt,
@@ -221,20 +228,20 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         LOGGER.info('Using SyncBatchNorm()')
 
     # Trainloader
-    train_loader, dataset = create_dataloader(train_path, imgsz, batch_size // WORLD_SIZE, gs, single_cls,
-                                              hyp=hyp, augment=True, cache=opt.cache, rect=opt.rect, rank=LOCAL_RANK,
-                                              workers=workers, image_weights=opt.image_weights, quad=opt.quad,
-                                              prefix=colorstr('train: '), shuffle=True)
+    # train_loader, dataset = create_dataloader(train_path, imgsz, batch_size // WORLD_SIZE, gs, single_cls,
+    #                                           hyp=hyp, augment=True, cache=opt.cache, rect=opt.rect, rank=LOCAL_RANK,
+    #                                           workers=workers, image_weights=opt.image_weights, quad=opt.quad,
+    #                                           prefix=colorstr('train: '), shuffle=True)
+    
+    train_ds = PthDataset(folder_type="train")
+    train_loader = DataLoader(train_ds)
+    dataset = torch.load("saved_tensors/train/dataset.pth")
     mlc = int(np.concatenate(dataset.labels, 0)[:, 0].max())  # max label class
     nb = len(train_loader)  # number of batches
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
     # Process 0
     if RANK in [-1, 0]:
-        val_loader = create_dataloader(val_path, imgsz, batch_size // WORLD_SIZE * 2, gs, single_cls,
-                                       hyp=hyp, cache=None if noval else opt.cache, rect=True, rank=-1,
-                                       workers=workers, pad=0.5,
-                                       prefix=colorstr('val: '))[0]
 
         if not resume:
             labels = np.concatenate(dataset.labels, 0)
@@ -278,7 +285,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     stopper = EarlyStopping(patience=opt.patience)
     compute_loss = ComputeLoss(model)  # init loss class
     LOGGER.info(f'Image sizes {imgsz} train, {imgsz} val\n'
-                f'Using {train_loader.num_workers * WORLD_SIZE} dataloader workers\n'
                 f"Logging results to {colorstr('bold', save_dir)}\n"
                 f'Starting training for {epochs} epochs...')
     for epoch in range(start_epoch, epochs):  # epoch ------------------------------------------------------------------
@@ -301,11 +307,14 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         LOGGER.info(('\n' + '%10s' * 7) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'labels', 'img_size'))
         if RANK in [-1, 0]:
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
+            
         optimizer.zero_grad()
-        for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
+        for i, (imgs, targets, paths) in pbar:  # batch -------------------------------------------------------------
             ni = i + nb * epoch  # number integrated batches (since train start)
-            imgs = imgs.to(device, non_blocking=True).float() / 255  # uint8 to float32, 0-255 to 0.0-1.0
-
+            imgs = torch.squeeze(imgs, axis = 0)
+            targets = torch.squeeze(targets, axis = 0)
+            paths = [path[0] for path in paths]
+            imgs = imgs.to(device, non_blocking=True).float()  # uint8 to float32, 0-255 to 0.0-1.0
             # Warmup
             if ni <= nw:
                 xi = [0, nw]  # x interp
@@ -365,13 +374,13 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'names', 'stride', 'class_weights'])
             final_epoch = (epoch + 1 == epochs) or stopper.possible_stop
             if not noval or final_epoch:  # Calculate mAP
-                results, maps, _ = val.run(data_dict,
+                results, maps, _ = val.run_pth(data_dict,
                                            batch_size=batch_size // WORLD_SIZE * 2,
                                            imgsz=imgsz,
                                            model=ema.ema,
                                            single_cls=single_cls,
-                                           dataloader=val_loader,
                                            save_dir=save_dir,
+                                        #    dataloader=val_loader,
                                            plots=False,
                                            callbacks=callbacks,
                                            compute_loss=compute_loss)
@@ -419,6 +428,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
         # end epoch ----------------------------------------------------------------------------------------------------
     # end training -----------------------------------------------------------------------------------------------------
+    
     if RANK in [-1, 0]:
         LOGGER.info(f'\n{epoch - start_epoch + 1} epochs completed in {(time.time() - t0) / 3600:.3f} hours.')
         for f in last, best:
@@ -426,13 +436,13 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                 strip_optimizer(f)  # strip optimizers
                 if f is best:
                     LOGGER.info(f'\nValidating {f}...')
-                    results, _, _ = val.run(data_dict,
+                    results, _, _ = val.run_pth(data_dict,
                                             batch_size=batch_size // WORLD_SIZE * 2,
                                             imgsz=imgsz,
                                             model=attempt_load(f, device).half(),
                                             iou_thres=0.65 if is_coco else 0.60,  # best pycocotools results at 0.65
                                             single_cls=single_cls,
-                                            dataloader=val_loader,
+                                            # dataloader=val_loader,
                                             save_dir=save_dir,
                                             save_json=is_coco,
                                             verbose=True,
@@ -638,11 +648,23 @@ if __name__ == "__main__":
     config.read(r"train.cfg")
     default_conf = dict(config.items('DEFAULT'))
     opt.imgsz = int(default_conf["imgsize"])
-    opt.batch = int(default_conf["batch"])
+    opt.batch_size = int(default_conf["batch"])
     opt.epochs = int(default_conf["epochs"])
     opt.data = str(default_conf["data"])
     opt.weights = str(default_conf["weights"])
     if torch.cuda.is_available():
         opt.device = int(default_conf["device"])
     opt.workers = int(default_conf["workers"])
+    
+    start_date = date.today()
+    start_date = start_date.strftime("%d/%m/%Y")
+    start_time = time.time()
     main(opt)
+    end_date = date.today()
+    end_date = end_date.strftime("%d/%m/%Y")
+    end_time = time.time()
+    hours, rem = divmod(end_time-start_time, 3600)
+    minutes, seconds = divmod(rem, 60)
+    print(f"Start date: {start_date} \nStart time: {start_time} \nEnd date: {end_date} \nEnd Time: {end_time} \nTime Diff: {int(hours)} h {int(minutes)} m {seconds} s")
+    with open("run_time.txt", "w") as f:
+        f.write(f"Start date: {start_date} \nStart time: {start_time} \nEnd date: {end_date} \nEnd Time: {end_time} \nTime Diff: {int(hours)} h {int(minutes)} m {seconds} s")

@@ -21,12 +21,14 @@
 *.json
 *.cfg
 !setup.cfg
+!train.cfg
 !cfg/yolov3*.cfg
 
 storage.googleapis.com
 runs/*
 data/*
 data/images/*
+yolov5_evaluation/*
 !data/*.yaml
 !data/hyps
 !data/scripts
@@ -254,3 +256,4 @@ com_crashlytics_export_strings.xml
 crashlytics.properties
 crashlytics-build.properties
 fabric.properties
+saved_tensors
