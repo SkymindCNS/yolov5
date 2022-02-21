@@ -343,6 +343,7 @@ if __name__ == "__main__":
     opt.epochs = int(default_conf["epochs"])
     opt.data = str(default_conf["data"])
     opt.weights = str(default_conf["weights"])
+    opt.rect = True #switch off mosaic
     if torch.cuda.is_available():
         opt.device = int(default_conf["device"])
     opt.workers = int(default_conf["workers"])

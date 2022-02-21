@@ -1,10 +1,10 @@
 
-path: ../yolov5_konsole_train_set_formatted # dataset root dir
+path: ../yolov5_konsole_train_set_rrct # dataset root dir
 train: images/train  # train images (relative to 'path') 128 images
 val: images/val  # val images (relative to 'path') 128 images
 test:  # test images (optional)
 
 # Classes
 nc: 4  # number of classes
-names: ['positive', 'negative', 'invalid-empty-result-region', 'invalid-smudge']  # class names
+names: ['positive', 'negative', 'invalid-empty-result-region', 'invalid-smudge']  # class names (need to fix class index)
 
