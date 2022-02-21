@@ -17,7 +17,7 @@ import pickle
 
 cuda = torch.cuda.is_available()
 device = 'cuda' if cuda else 'cpu'
-onnx_path    = "onnx_weights/best_1.onnx"
+onnx_path    = "onnx_weights/best_5.onnx"
 test_folder_path = "../yolov5_konsole_test_set"
 half = FALSE
 names = ['positive', 'negative', 'invalid-empty-result-region', 'invalid-smudge']

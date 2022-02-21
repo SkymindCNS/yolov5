@@ -483,6 +483,7 @@ def parse_opt(known=False):
     parser.add_argument('--freeze', nargs='+', type=int, default=[0], help='Freeze layers: backbone=10, first3=0 1 2')
     parser.add_argument('--save-period', type=int, default=-1, help='Save checkpoint every x epochs (disabled if < 1)')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
+    parser.add_argument('--fine_tune', type=bool, default=False, help="If finetune will read finetune.cfg")
 
     # Weights & Biases arguments
     parser.add_argument('--entity', default=None, help='W&B: Entity')
@@ -635,7 +636,10 @@ def run(**kwargs):
 if __name__ == "__main__":
     opt = parse_opt()
     config = configparser.ConfigParser()
-    config.read(r"train.cfg")
+    if opt.fine_tune:
+        config.read("finetune.cfg")
+    else:
+        config.read(r"train.cfg")
     default_conf = dict(config.items('DEFAULT'))
     opt.imgsz = int(default_conf["imgsize"])
     opt.batch = int(default_conf["batch"])
