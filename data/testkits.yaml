@@ -5,6 +5,6 @@ val: images/val  # val images (relative to 'path') 128 images
 test:  # test images (optional)
 
 # Classes
-nc: 2  # number of classes
-names: ['negative', 'positive']  # class names
+nc: 4  # number of classes
+names: ['positive', 'negative', 'invalid-empty-result-region', 'invalid-smudge']  # class names
 
