@@ -20,6 +20,7 @@ from tensorflow.keras.utils import to_categorical
 from sklearn.metrics import roc_curve, auc
 import pandas as pd
 import plotly.express as px
+import math
 
 cuda = torch.cuda.is_available()
 device = 'cuda' if cuda else 'cpu'
@@ -419,8 +420,9 @@ def roc_curves(y_true, y_pred, interactive_plot=True, average_only=True):
 
     # Compute TPR, FPR, Threshold
     for i in range(n_class):
-        fpr[i], tpr[i], thresh[i] = roc_curve(label[:, i], pred_prob[:, i])
-        roc_auc[i] = auc(fpr[i], tpr[i])
+        cls = names[i]
+        fpr[cls], tpr[cls], thresh[cls] = roc_curve(label[:, i], pred_prob[:, i])
+        roc_auc[cls] = auc(fpr[cls], tpr[cls])
 
     # # Compute micro-average ROC curve and ROC area
     fpr["micro"], tpr["micro"], thresh["micro"] = roc_curve(label.ravel(), pred_prob.ravel())
@@ -432,19 +434,22 @@ def roc_curves(y_true, y_pred, interactive_plot=True, average_only=True):
 
     if interactive_plot:
         if average_only:
-            df_fpr_tpr, fprOpt, tprOpt, thresholdOpt = optimal_threshold(fpr, tpr, thresh, roc_class="micro")
-            fig = px.line(df_fpr_tpr, x='FPR', y='TPR', title=f'ROC Curve ({i})',
+            roc_average = "micro"
+            df_fpr_tpr, fprOpt, tprOpt, thresholdOpt = optimal_threshold(fpr, tpr, thresh, roc_class=roc_average)
+            fig = px.line(df_fpr_tpr, x='FPR', y='TPR', title=f'ROC Curve ({roc_average})',
                           markers=True, hover_data=['FPR', 'TPR', 'Threshold'], color_discrete_sequence=colorss[-1])
             fig.add_annotation(
                 text=f'Optimal threshold based on G-mean: {thresholdOpt}', x=fprOpt, y=tprOpt, arrowhead=2)
             fig.show()
-            fig.write_image(output_folder + f'/yolov5_roc_{i}.jpg')
+            fig.write_image(output_folder + f'/yolov5_roc_{roc_average}.jpg')
 
         else:
             for count, i in enumerate(plot_type):
                 df_fpr_tpr, fprOpt, tprOpt, thresholdOpt = optimal_threshold(fpr, tpr, thresh, roc_class=i)
 
-                # Plot ROC curve using Plotly
+                if math.isnan(tprOpt):
+                    continue
+
                 fig = px.line(df_fpr_tpr, x='FPR', y='TPR', title=f'ROC Curve ({i})',
                               markers=True, hover_data=['FPR', 'TPR', 'Threshold'], color_discrete_sequence=colorss[count])
                 fig.add_annotation(
