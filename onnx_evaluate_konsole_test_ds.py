@@ -24,10 +24,10 @@ import plotly.express as px
 cuda = torch.cuda.is_available()
 device = 'cuda' if cuda else 'cpu'
 onnx_path = "onnx_weights/best_5.onnx"
-test_folder_path = "../dataset/test_set_yolov5"
+test_folder_path = "../dataset/v300"
 half = FALSE
 names = ['positive', 'negative', 'invalid-empty-result-region', 'invalid-smudge']
-output_folder = "../model_evaluation/test_set"
+output_folder = "../model_evaluation/yolov5_evaluation/test_set_v300"
 
 
 conf_thres = 0.8  # confidence threshold
@@ -375,7 +375,25 @@ def evaluate_results(y_label, y_pred, average_inference_time, group_invalid):
         f.write(f"average inference time: {average_inference_time:.2f} ms")
 
 
-def roc_curves(y_true, y_pred, interactive_plot=True):
+def optimal_threshold(fpr, tpr, thresh, roc_class):
+    df_fpr_tpr = pd.DataFrame({'FPR': fpr[roc_class], 'TPR': tpr[roc_class], 'Threshold': thresh[roc_class]})
+
+    # Calculate the G-mean
+    gmean = np.sqrt(tpr[roc_class] * (1 - fpr[roc_class]))
+
+    # Find the optimal threshold
+    index = np.argmax(gmean)
+    thresholdOpt = round(thresh[roc_class][index], ndigits=4)
+    gmeanOpt = round(gmean[index], ndigits=4)
+    fprOpt = round(fpr[roc_class][index], ndigits=4)
+    tprOpt = round(tpr[roc_class][index], ndigits=4)
+    print('Best Threshold: {} with G-Mean: {}'.format(thresholdOpt, gmeanOpt))
+    print('FPR: {}, TPR: {}'.format(fprOpt, tprOpt))
+
+    return df_fpr_tpr, fprOpt, tprOpt, thresholdOpt
+
+
+def roc_curves(y_true, y_pred, interactive_plot=True, average_only=True):
     fpr = {}
     tpr = {}
     thresh = {}
@@ -413,29 +431,26 @@ def roc_curves(y_true, y_pred, interactive_plot=True):
     colorss = [["red"], ["green"], ["blue"], ["goldenrod"], ["magenta"]]
 
     if interactive_plot:
-        for count, i in enumerate(plot_type):
-            df_fpr_tpr = pd.DataFrame({'FPR': fpr[i], 'TPR': tpr[i], 'Threshold': thresh[i]})
-
-            # Calculate the G-mean
-            gmean = np.sqrt(tpr[i] * (1 - fpr[i]))
-
-            # Find the optimal threshold based on G-mean
-            index = np.argmax(gmean)
-            thresholdOpt = round(thresh[i][index], ndigits=4)
-            gmeanOpt = round(gmean[index], ndigits=4)
-            fprOpt = round(fpr[i][index], ndigits=4)
-            tprOpt = round(tpr[i][index], ndigits=4)
-            print('Best Threshold for class {}: {} with G-Mean: {}'.format(i, thresholdOpt, gmeanOpt))
-            print('FPR: {}, TPR: {}'.format(fprOpt, tprOpt))
-
-            # Plot ROC curve using Plotly
+        if average_only:
+            df_fpr_tpr, fprOpt, tprOpt, thresholdOpt = optimal_threshold(fpr, tpr, thresh, roc_class="micro")
             fig = px.line(df_fpr_tpr, x='FPR', y='TPR', title=f'ROC Curve ({i})',
-                          markers=True, hover_data=['FPR', 'TPR', 'Threshold'], color_discrete_sequence=colorss[count])
+                          markers=True, hover_data=['FPR', 'TPR', 'Threshold'], color_discrete_sequence=colorss[-1])
             fig.add_annotation(
                 text=f'Optimal threshold based on G-mean: {thresholdOpt}', x=fprOpt, y=tprOpt, arrowhead=2)
-            # fig.update_traces(textposition='bottom right')
             fig.show()
-            fig.write_image(f'roc_curve/yolov5_roc_{i}.jpg')
+            fig.write_image(output_folder + f'/yolov5_roc_{i}.jpg')
+
+        else:
+            for count, i in enumerate(plot_type):
+                df_fpr_tpr, fprOpt, tprOpt, thresholdOpt = optimal_threshold(fpr, tpr, thresh, roc_class=i)
+
+                # Plot ROC curve using Plotly
+                fig = px.line(df_fpr_tpr, x='FPR', y='TPR', title=f'ROC Curve ({i})',
+                              markers=True, hover_data=['FPR', 'TPR', 'Threshold'], color_discrete_sequence=colorss[count])
+                fig.add_annotation(
+                    text=f'Optimal threshold based on G-mean: {thresholdOpt}', x=fprOpt, y=tprOpt, arrowhead=2)
+                fig.show()
+                fig.write_image(output_folder + f'/yolov5_roc_class_{i}.jpg')
 
 
 if __name__ == "__main__":
@@ -486,7 +501,7 @@ if __name__ == "__main__":
             path = Path(output_folder) / 'incorrect' / f'lbl_{names[correct_class_idx]}_pred_under-thres' / imgname
             cv2.imwrite(str(path), labelled_img)
 
-    roc_curves(y_class, pred_prob)
+    roc_curves(y_class, pred_prob, interactive_plot=True, average_only=True)
 
     average_inference_time = np.mean(time_takens)
 
